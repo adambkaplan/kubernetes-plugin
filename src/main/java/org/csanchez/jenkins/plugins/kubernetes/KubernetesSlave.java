@@ -181,6 +181,8 @@ public class KubernetesSlave extends AbstractCloudSlave {
     @Override
     protected void _terminate(TaskListener listener) throws IOException, InterruptedException {
         LOGGER.log(Level.INFO, "Terminating Kubernetes instance for agent {0}", name);
+        Exception debugEx = new Exception("DEBUG");
+        LOGGER.log(Level.INFO, "_terminate: ", debugEx);
 
         Computer computer = toComputer();
         if (computer == null) {
@@ -207,6 +209,7 @@ public class KubernetesSlave extends AbstractCloudSlave {
             listener.fatalError(msg);
             return;
         }
+
         KubernetesCloud cloud;
         try {
             cloud = getKubernetesCloud();
@@ -215,6 +218,16 @@ public class KubernetesSlave extends AbstractCloudSlave {
             LOGGER.log(Level.SEVERE, String.format("Unable to terminate agent %s. Cloud may have been removed. There may be leftover resources on the Kubernetes cluster.", name));
             return;
         }
+
+        if (!cloud.isKeepPods()) {
+            deleteSlavePod(listener, cloud);
+        }
+        String msg = String.format("Disconnected computer %s", name);
+        LOGGER.log(Level.INFO, msg);
+        listener.getLogger().println(msg);
+    }
+
+    public void deleteSlavePod(TaskListener listener, KubernetesCloud cloud) throws IOException {
         KubernetesClient client;
         try {
             client = cloud.connect();
@@ -245,7 +258,6 @@ public class KubernetesSlave extends AbstractCloudSlave {
         String msg = String.format("Terminated Kubernetes instance for agent %s/%s", actualNamespace, name);
         LOGGER.log(Level.INFO, msg);
         listener.getLogger().println(msg);
-        LOGGER.log(Level.INFO, "Disconnected computer {0}", name);
     }
 
     @Override

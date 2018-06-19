@@ -114,6 +114,7 @@ public class KubernetesCloud extends Cloud {
 
     private transient KubernetesClient client;
     private int maxRequestsPerHost;
+    private boolean keepPods;
 
     @DataBoundConstructor
     public KubernetesCloud(String name) {
@@ -142,6 +143,7 @@ public class KubernetesCloud extends Cloud {
         this.containerCap = source.containerCap;
         this.retentionTimeout = source.retentionTimeout;
         this.connectTimeout = source.connectTimeout;
+        this.keepPods = source.keepPods;
     }
 
     @Deprecated
@@ -375,6 +377,19 @@ public class KubernetesCloud extends Cloud {
 
     public void setConnectTimeout(int connectTimeout) {
         this.connectTimeout = connectTimeout;
+    }
+
+    /**
+     * Keep Kubernetes pods
+     * @return the keepPods
+     */
+    public boolean isKeepPods() {
+        return keepPods;
+    }
+
+    @DataBoundSetter
+    public void setKeepPods(boolean keepPods) {
+        this.keepPods = keepPods;
     }
 
     /**
