@@ -39,6 +39,7 @@ import hudson.slaves.CloudRetentionStrategy;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.OfflineCause;
 import hudson.slaves.RetentionStrategy;
+import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import jenkins.model.Jenkins;
@@ -181,8 +182,29 @@ public class KubernetesSlave extends AbstractCloudSlave {
     @Override
     protected void _terminate(TaskListener listener) throws IOException, InterruptedException {
         LOGGER.log(Level.INFO, "Terminating Kubernetes instance for agent {0}", name);
-        Exception debugEx = new Exception("DEBUG");
-        LOGGER.log(Level.INFO, "_terminate: ", debugEx);
+        
+        KubernetesCloud cloud;
+        try {
+            cloud = getKubernetesCloud();
+        } catch (IllegalStateException e) {
+            e.printStackTrace(listener.fatalError("Unable to terminate agent. Cloud may have been removed. There may be leftover resources on the Kubernetes cluster."));
+            LOGGER.log(Level.SEVERE, String.format("Unable to terminate agent %s. Cloud may have been removed. There may be leftover resources on the Kubernetes cluster.", name));
+            return;
+        }
+
+        KubernetesClient client;
+        try {
+            client = cloud.connect();
+        } catch (UnrecoverableKeyException | CertificateEncodingException | NoSuchAlgorithmException
+                | KeyStoreException e) {
+            String msg = String.format("Failed to connect to cloud %s. There may be leftover resources on the Kubernetes cluster.", getCloudName());
+            e.printStackTrace(listener.fatalError(msg));
+            LOGGER.log(Level.SEVERE, msg);
+            return;
+        }
+        String podStatus = getSlavePodStatus(client);
+        
+        boolean keepPod = cloud.isKeepPods() ? true : podStatus.toLowerCase().matches("(failed|unknown)");
 
         Computer computer = toComputer();
         if (computer == null) {
@@ -210,34 +232,15 @@ public class KubernetesSlave extends AbstractCloudSlave {
             return;
         }
 
-        KubernetesCloud cloud;
-        try {
-            cloud = getKubernetesCloud();
-        } catch (IllegalStateException e) {
-            e.printStackTrace(listener.fatalError("Unable to terminate agent. Cloud may have been removed. There may be leftover resources on the Kubernetes cluster."));
-            LOGGER.log(Level.SEVERE, String.format("Unable to terminate agent %s. Cloud may have been removed. There may be leftover resources on the Kubernetes cluster.", name));
-            return;
-        }
-
-        if (!cloud.isKeepPods()) {
-            deleteSlavePod(listener, cloud);
+        if (!keepPod) {
+            deleteSlavePod(listener, client);
         }
         String msg = String.format("Disconnected computer %s", name);
         LOGGER.log(Level.INFO, msg);
         listener.getLogger().println(msg);
     }
 
-    public void deleteSlavePod(TaskListener listener, KubernetesCloud cloud) throws IOException {
-        KubernetesClient client;
-        try {
-            client = cloud.connect();
-        } catch (UnrecoverableKeyException | CertificateEncodingException | NoSuchAlgorithmException
-                | KeyStoreException e) {
-            String msg = String.format("Failed to connect to cloud %s", getCloudName());
-            e.printStackTrace(listener.fatalError(msg));
-            return;
-        }
-
+    public void deleteSlavePod(TaskListener listener, KubernetesClient client) throws IOException {
         String actualNamespace = getNamespace() == null ? client.getNamespace() : getNamespace();
         try {
             Boolean deleted = client.pods().inNamespace(actualNamespace).withName(name).delete();
@@ -258,6 +261,16 @@ public class KubernetesSlave extends AbstractCloudSlave {
         String msg = String.format("Terminated Kubernetes instance for agent %s/%s", actualNamespace, name);
         LOGGER.log(Level.INFO, msg);
         listener.getLogger().println(msg);
+    }
+
+    private String getSlavePodStatus(KubernetesClient client) {
+        String actualNamespace = getNamespace() == null ? client.getNamespace() : getNamespace();
+        Pod pod = client.pods().inNamespace(actualNamespace).withName(name).get();
+        if (pod == null) {
+            // Pod doesn't exist
+            return "unknown";
+        }
+        return pod.getStatus().getPhase();
     }
 
     @Override
