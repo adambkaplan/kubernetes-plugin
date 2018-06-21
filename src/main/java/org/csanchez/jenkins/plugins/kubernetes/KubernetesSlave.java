@@ -33,6 +33,8 @@ import hudson.model.Label;
 import hudson.model.Node;
 import hudson.model.Queue;
 import hudson.model.TaskListener;
+import hudson.remoting.Engine;
+import hudson.remoting.VirtualChannel;
 import hudson.slaves.AbstractCloudSlave;
 import hudson.slaves.Cloud;
 import hudson.slaves.CloudRetentionStrategy;
@@ -43,6 +45,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import jenkins.model.Jenkins;
+import jenkins.security.MasterToSlaveCallable;
 
 /**
  * @author Carlos Sanchez carlos@apache.org
@@ -212,6 +215,12 @@ public class KubernetesSlave extends AbstractCloudSlave {
             LOGGER.log(Level.SEVERE, msg);
             listener.fatalError(msg);
             return;
+        }
+
+        // Tell the slave to stop JNLP reconnects.
+        VirtualChannel ch = computer.getChannel();
+        if (ch != null) {
+            ch.call(new SlaveDisconnector());
         }
 
         OfflineCause offlineCause = OfflineCause.create(new Localizable(HOLDER, "offline"));
@@ -446,6 +455,32 @@ public class KubernetesSlave extends AbstractCloudSlave {
         @Override
         public boolean isInstantiable() {
             return false;
+        }
+
+    }
+
+    private static class SlaveDisconnector extends MasterToSlaveCallable<Void, IOException> {
+
+        private static final long serialVersionUID = -1l;
+
+        private static final Logger LOGGER = Logger.getLogger(SlaveDisconnector.class.getName());
+
+        @Override
+        public Void call() throws IOException {
+            Engine e = Engine.current();
+            // No engine, do nothing.
+            if (e == null) {
+                return null;
+            }
+            // Ensure the slave supports setNoReconnect
+            try {
+                Engine.class.getMethod("setNoReconnect", boolean.class);
+            } catch (NoSuchMethodException ex) {
+                return null;
+            }
+            e.setNoReconnect(true);
+            LOGGER.log(Level.INFO, "Disabled slave engine reconnects.");
+            return null;
         }
 
     }
